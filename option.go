@@ -3,7 +3,7 @@ package dbcleaner
 import (
 	"time"
 
-	"github.com/khaiql/dbcleaner/logging"
+	"github.com/heimonsy/dbcleaner/logging"
 )
 
 // Options defines properties that dbEngine would use during trying to acquire and clean tables, including

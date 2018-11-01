@@ -12,23 +12,15 @@ import (
 	"time"
 
 	filemutex "github.com/alexflint/go-filemutex"
-	"github.com/khaiql/dbcleaner/engine"
-	"github.com/khaiql/dbcleaner/logging"
+	"github.com/heimonsy/dbcleaner/logging"
 )
 
-// DbCleaner interface
 type DbCleaner interface {
-	// SetEngine sets dbEngine, can be mysql, postgres...
-	SetEngine(dbEngine engine.Engine)
-
 	// Acquire will lock tables passed in params so data in the table would not be deleted by other test cases
 	Acquire(tables ...string)
 
-	// Clean calls Truncate the tables
-	Clean(tables ...string)
-
-	// Close calls corresponding method on dbEngine to release connection to db
-	Close() error
+	// Release release all tables
+	Release(tables ...string)
 }
 
 var (
@@ -36,13 +28,13 @@ var (
 	ErrTableNeverLockBefore = errors.New("table has never been locked before")
 )
 
-// New returns a default Cleaner with Noop Engine. Call SetEngine to set an actual working engine
+// New returns a default Cleaner with Noop. Call SetEngine to set an actual working engine
 func New(opts ...Option) DbCleaner {
 	options := &Options{
 		Logger:        &logging.Noop{},
-		LockTimeout:   10 * time.Second,
-		NumberOfRetry: 5,
-		RetryInterval: 10 * time.Second,
+		LockTimeout:   30 * time.Second,
+		NumberOfRetry: 120,
+		RetryInterval: 250 * time.Millisecond,
 		LockFileDir:   "/tmp/",
 	}
 
@@ -51,16 +43,14 @@ func New(opts ...Option) DbCleaner {
 	}
 
 	return &cleanerImpl{
-		locks:    sync.Map{},
-		dbEngine: &engine.NoOp{},
-		options:  options,
+		locks:   sync.Map{},
+		options: options,
 	}
 }
 
 type cleanerImpl struct {
-	locks    sync.Map
-	dbEngine engine.Engine
-	options  *Options
+	locks   sync.Map
+	options *Options
 }
 
 func (c *cleanerImpl) loadFileMutexForTable(table string) (*filemutex.FileMutex, error) {
@@ -71,10 +61,6 @@ func (c *cleanerImpl) loadFileMutexForTable(table string) (*filemutex.FileMutex,
 
 	value, _ := c.locks.LoadOrStore(table, fmutex)
 	return value.(*filemutex.FileMutex), nil
-}
-
-func (c *cleanerImpl) SetEngine(dbEngine engine.Engine) {
-	c.dbEngine = dbEngine
 }
 
 func (c *cleanerImpl) acquireTable(ctx context.Context, table string) error {
@@ -160,20 +146,11 @@ func (c *cleanerImpl) Acquire(tables ...string) {
 	panic(fmt.Errorf("failed to ACQUIRE tables %v after %d times", tables, tried))
 }
 
-func (c *cleanerImpl) Clean(tables ...string) {
+func (c *cleanerImpl) Release(tables ...string) {
 	for _, table := range tables {
-		c.options.Logger.Println("Truncate table %s", table)
-		if err := c.dbEngine.Truncate(table); err != nil {
-			panic(err)
-		}
-
 		if err := c.releaseTable(table); err != nil {
 			panic(err)
 		}
 		c.options.Logger.Println("Released lock for table %s", table)
 	}
-}
-
-func (c *cleanerImpl) Close() error {
-	return c.dbEngine.Close()
 }
